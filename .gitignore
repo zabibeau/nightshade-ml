@@ -1,2 +1,7 @@
 nightshade_env/
 __pycache__/
+*.zip
+train2014/
+annotations/
+poisoning_candidates/
+testing/

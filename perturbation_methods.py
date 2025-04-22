@@ -45,7 +45,7 @@ def pgd_penalty(source_tensor, target_latent, modifier, latent_function, iterati
     
     return perturbation
 
-def nightshade_penalty(source_tensor, target_latent, modifier, latent_function, t_size=100, eps=0.05, max_change=0):
+def nightshade_penalty(source_tensor, target_latent, modifier, latent_function, t_size=50, eps=0.05, max_change=0):
 
     # Implementation of the Nightshade method for perturbation
     # as seen in https://arxiv.org/pdf/2310.13828
@@ -65,5 +65,8 @@ def nightshade_penalty(source_tensor, target_latent, modifier, latent_function, 
         grad = torch.autograd.grad(loss.sum(), modifier)[0]
         modifier = modifier - torch.sign(grad) * actual_step_size
         modifier = torch.clamp(modifier, -max_change, max_change).detach()
+
+        if i % 10 == 0:
+            print(f"Iteration {i}\tLoss: {loss.mean().item():.3f}")
     
     return modifier

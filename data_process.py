@@ -1,4 +1,6 @@
+import json
 import clip
+import pandas as pd
 import torch
 import os
 import glob
@@ -8,6 +10,7 @@ from torchvision import transforms
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import random
+from tqdm.notebook import tqdm
 
 # Note: this code is heavily based on the original nightshade implementation which can be found at:
 # https://github.com/Shawn-Shan/nightshade-release/tree/main
@@ -27,19 +30,19 @@ class ClipModel(object):
     def __init__(self, device):
         self.device = device
         self.model, self.preprocess = clip.load("ViT-B/32", device=device)
-        self.model.to(self.device)
+        self.model.cuda()
         self.tokenizer = clip.tokenize
 
     def get_text_embedding(self, text):
         if isinstance(text, str):
             text = [text]
-        text = self.tokenizer(text, truncate=True).to(self.device)
+        tokenized_text = self.tokenizer(text, truncate=True).to(self.device)
         with torch.no_grad():
-            text_features = self.model.encode_text(text)
+            text_features = self.model.encode_text(tokenized_text)
         return text_features
     
-    def get_image_embedding(self, image):
-        image = self.preprocess(image).unsqueeze(0).to(self.device)
+    def get_image_embedding(self, img):
+        image = self.preprocess(img).unsqueeze(0).to(self.device)
         with torch.no_grad():
             image_features = self.model.encode_image(image)
         return image_features
@@ -47,14 +50,15 @@ class ClipModel(object):
     def get_score(self, image, text, softmax=False):
         if isinstance(text, str):
             text = [text]
-        
+
         if isinstance(image, list):
-            image = [self.preprocess(img).unsqueeze(0).to(self.device) for img in image]
-            image = torch.cat(image, dim=0)
+            image = [self.preprocess(i).unsqueeze(0).to(self.device) for i in image]
+            image = torch.concat(image)
         else:
             image = self.preprocess(image).unsqueeze(0).to(self.device)
-        
-        text = self.tokenizer(text, truncate=True).to(self.device)
+
+        text = self.tokenizer(text).to(self.device)
+
         if softmax:
             with torch.no_grad():
                 logits_per_image, logits_per_text = self.model(image, text)
@@ -66,55 +70,84 @@ class ClipModel(object):
                 text_features = self.model.encode_text(text)
 
                 image_features /= image_features.norm(dim=-1, keepdim=True)
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                text_features /= text_features.norm(dim=-1, keepdim=True)
                 similarity = text_features.cpu().numpy() @ image_features.cpu().numpy().T
-                return similarity[0][0]
+                s = similarity[0][0]
+
+            return s
+
             
-
-def DataProcess():
+def get_dataset(annotation_file, data_dir, limit=None, unique_images=True):
+    """
+    Args:
+        unique_images: If True, returns only one caption per image (randomly selected)
+    """
+    annotations = json.load(open(annotation_file, 'r'))
     
-    def __init__(self, device):
-        self.clip_model = ClipModel(device)
-        self.device = device
-
-    def process_data(self, directory, concept, outdir, num):
-        data_dir = directory
-        concept = concept
-        os.makedirs(outdir, exist_ok=True)
-        all_data = glob.glob(os.path.join(data_dir, '*.p'))
-        res = []
-
-        # Load data from specified file
-        for i, cur_file in enumerate(all_data):
-            data = pickle.load(open(cur_file, 'rb'))
-            img = Image.fromarray(data['img'])
-            text = data['text']
-
-            img = crop_to_square(img)
-            score = self.clip_model.get_score(img, f"a photo of a {concept}")
-            # Make sure that the prompt somewhat matches the photo
-            if score > 0.25:
-                res.append((img, text))
-
-        if len(res) < num:
-            raise Exception(f"Not enough data for {concept}, found {len(res)}, required {num}")
+    # Group by image_id if we want unique images
+    if unique_images:
+        from collections import defaultdict
+        image_dict = defaultdict(list)
+        for ann in annotations['annotations']:
+            image_dict[ann['image_id']].append(ann)
         
-        # Get text embeddings for all prompts and targets
-        all_prompts = [d[1] for d in res]
-        text_embeddings = self.clip_model.get_text_embedding(all_prompts)
-        text_embeddings_target = self.clip_model.get_text_embedding(f"a photo of a {concept}")
-        text_embeddings = text_embeddings.cpu().float().numpy()
-        text_embeddings_target = text_embeddings_target.cpu().float().numpy()
+        # Randomly select one caption per image
+        data = []
+        for img_id, anns in image_dict.items():
+            selected = random.choice(anns)
+            data.append({
+                'annotation_id': selected['id'],
+                'image_id': img_id,
+                'caption': selected['caption'],
+                'image_path': f"{data_dir}/COCO_train2014_{img_id:012d}.jpg"
+            })
+    else:
+        data = [{
+            'annotation_id': ann['id'],
+            'image_id': ann['image_id'],
+            'caption': ann['caption'],
+            'image_path': f"{data_dir}/COCO_train2014_{ann['image_id']:012d}.jpg"
+        } for ann in annotations['annotations']]
+    
+    df = pd.DataFrame(data)
+    if limit:
+        df = df.head(limit)
+    
+    print(f"Loaded {len(df)} {'unique image' if unique_images else 'caption'} entries")
+    return df
 
-        # Calculate cosine similarity between prompt and target embeddings and select the top 300 candidates
-        sims = cosine_similarity(text_embeddings, text_embeddings_target).reshape(-1)
-        candidates = np.argsort(sims)[::-1][:300]
-        random_selected_candidate = random.sample(list(candidates), num)
-        final_list = [res[i] for i in random_selected_candidate]
-        for i, data in enumerate(final_list):
-            img, text = data
-            current_data = {
-                "img": np.array(img),
-                "text": text
-            }
-            pickle.dump(current_data, open(os.path.join(outdir, f"{concept}_{i}.p"), 'wb'))
+def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.25, output_dir='poisoning_candidates'):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    clip_model = ClipModel(device)
+    os.makedirs(output_dir, exist_ok=True)
+    candidates = []
+
+    for _, row in tqdm(df.iterrows(), desc="Processing images", total=len(df)):
+        try:
+            img = Image.open(row['image_path']).convert("RGB")
+            img = crop_to_square(img)
+            score = clip_model.get_score(img, f"a photo of a {concept}")
+            if score > clip_threshold:
+                candidates.append((img, row['caption'], row['image_id']))
+        except Exception as e:
+            print(f"Error processing image {row['image_path']}: {e}")
+            continue
+    if len(candidates) < num_candidates:
+        raise Exception(f"Not enough candidates for {concept}, found {len(candidates)}, required {num_candidates}")
+    
+    captions = [c[1] for c in candidates]
+    caption_embeddings = clip_model.get_text_embedding(captions).cpu().numpy()
+    target_embedding = clip_model.get_text_embedding(f"a photo of a {concept}").cpu().numpy()
+    sims = cosine_similarity(caption_embeddings, target_embedding).flatten()
+    top_candidates = np.argsort(sims)[::-1][:num_candidates]
+
+    for i, idx in tqdm(enumerate(top_candidates), desc=f"Saving candidates for {concept}", total=len(top_candidates)):
+        img, caption, image_id = candidates[idx]
+        current_data = {
+            "img": np.array(img),
+            "text": caption,
+            "image_id": image_id
+        }
+        pickle.dump(current_data, open(os.path.join(output_dir, f"{concept}_{i}.p"), 'wb'))
+
+    print(f"Saved {len(top_candidates)} poisoning candidates for {concept} in {output_dir}")
