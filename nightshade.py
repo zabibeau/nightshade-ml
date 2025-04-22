@@ -7,6 +7,10 @@ from torchvision import transforms
 
 SD_MODEL = "stabilityai/stable-diffusion-2-1"
 
+
+# Note: parts of this code are heavily based on the original nightshade implementation which can be found at:
+# https://github.com/Shawn-Shan/nightshade-release/tree/main
+
 class Nightshade:
     
     def __init__(self, target_concept, device, eps=0.1, penalty_method=None):
@@ -15,9 +19,10 @@ class Nightshade:
         self.eps = eps
         self.sd_pipeline = self.get_model()
         self.transform = self._create_transforms()
-        self.penalty_method = penalty_method
-
-
+        if penalty_method is None:
+            raise ValueError("Please provide a valid penalty method.")
+        else:
+            self.penalty_method = penalty_method
 
     def get_model(self):
         # Load the Stable Diffusion model
@@ -31,18 +36,28 @@ class Nightshade:
         return pipe
 
     def _create_transforms(self):
-        return transforms.Compose([
-            transforms.Resize(512, transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(512),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5])
-        ])
+        # Create the image transforms to resize and crop images to 512x512
+        image_transforms = transforms.Compose(
+            [
+                transforms.Resize(512, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(512),
+            ]
+        )
+        return image_transforms
     
     def get_latent(self, tensor):
+        # Convert the image tensor to latent space using the VAE of the Stable Diffusion model
+        tensor = tensor.to(self.device)
         latent = self.sd_pipeline.vae.encode(tensor).latent_dist.mean
         return latent
     
     def get_penalty(self, source_tensor, target_latent, modifier):
+
+        source_tensor = source_tensor.to(self.device)
+        target_latent = target_latent.to(self.device)
+        modifier = modifier.to(self.device)
+        
+        # Generate the perturbation using the penalty method
         perturbation = self.penalty_method(
             source_tensor, 
             target_latent, 
@@ -50,19 +65,21 @@ class Nightshade:
             self.get_latent, 
             eps=self.eps
         )
+        # Clamp the perturbation to ensure pixel values are within valid range
         final_penalty_tensor = torch.clamp(perturbation + source_tensor, -1, 1)
-        return final_penalty_tensor
+        return final_penalty_tensor.to(self.device)
 
     def convert_to_tensor(self, cur_img):
-        cur_img = cur_img.resize((512, 512), resample=Image.Resampling.BICUBIC)
+        # Convert the input image to a tensor
+        cur_img = cur_img.resize((512, 512), resample=Image.BICUBIC)
         cur_img = np.array(cur_img)
         img = (cur_img / 127.5 - 1.0).astype(np.float32)
         img = rearrange(img, 'h w c -> c h w')
-        img = torch.tensor(img).unsqueeze(0)
+        img = torch.tensor(img, device=self.device).unsqueeze(0)
         return img
 
-
     def convert_to_image(self, cur_img):
+        # Conver the tensor back into an image
         if len(cur_img) == 512:
             cur_img = cur_img.unsqueeze(0)
 
@@ -72,7 +89,8 @@ class Nightshade:
         return cur_img
     
     def generate(self, img, target_concept):
-        resized_img = self.preprocess_image(img)
+        # Generate an adversarial image based on the input image and target concept
+        resized_img = self.transform(img)
         source_tensor = self.convert_to_tensor(resized_img).to(self.device)
         target_image = self.generate_target(f"A photo of a {target_concept}")
         target_tensor = self.convert_to_tensor(target_image).to(self.device)
@@ -80,14 +98,16 @@ class Nightshade:
         with torch.no_grad():
             target_latent = self.get_latent(target_tensor.half())
 
-        modifier = torch.zeros_like(source_tensor.half())
+        modifier = torch.zeros_like(source_tensor.half(), device=self.device)
         source_tensor = source_tensor.half()
 
+        # Get the modified image based on the source tensor, target latent, and modifier
         final_adv = self.get_penalty(source_tensor, target_latent, modifier)
 
         return self.convert_to_image(final_adv)
 
     def generate_target(self, prompts):
+        # Generate the target image using the Stable Diffusion pipeline
         torch.manual_seed(5806)
         with torch.no_grad():
             target_imgs = self.sd_pipeline(
