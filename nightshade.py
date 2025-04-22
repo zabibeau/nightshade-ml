@@ -47,7 +47,6 @@ class Nightshade:
     
     def get_latent(self, tensor):
         # Convert the image tensor to latent space using the VAE of the Stable Diffusion model
-        tensor = tensor.to(self.device)
         latent = self.sd_pipeline.vae.encode(tensor).latent_dist.mean
         return latent
     
@@ -66,8 +65,8 @@ class Nightshade:
             eps=self.eps
         )
         # Clamp the perturbation to ensure pixel values are within valid range
-        final_penalty_tensor = torch.clamp(perturbation + source_tensor, -1, 1)
-        return final_penalty_tensor.to(self.device)
+        final_penalty_tensor = torch.clamp(perturbation + source_tensor, -1.0, 1.0)
+        return final_penalty_tensor
 
     def convert_to_tensor(self, cur_img):
         # Convert the input image to a tensor
@@ -90,32 +89,31 @@ class Nightshade:
     
     def generate(self, img, target_concept):
         # Generate an adversarial image based on the input image and target concept
-        resized_img = self.transform(img)
-        source_tensor = self.convert_to_tensor(resized_img).to(self.device)
+
         target_image = self.generate_target(f"A photo of a {target_concept}")
+        resized_img = self.transform(img)
+
+        source_tensor = self.convert_to_tensor(resized_img).to(self.device)
         target_tensor = self.convert_to_tensor(target_image).to(self.device)
 
-        with torch.no_grad():
-            target_latent = self.get_latent(target_tensor.half())
-
-        modifier = torch.zeros_like(source_tensor.half(), device=self.device)
         source_tensor = source_tensor.half()
+        target_tensor = target_tensor.half()
+
+        with torch.no_grad():
+            target_latent = self.get_latent(target_tensor)
+
+        modifier = torch.clone(source_tensor) * 0.0
+
 
         # Get the modified image based on the source tensor, target latent, and modifier
         final_adv = self.get_penalty(source_tensor, target_latent, modifier)
 
         return self.convert_to_image(final_adv)
 
-    def generate_target(self, prompts):
-        # Generate the target image using the Stable Diffusion pipeline
-        torch.manual_seed(5806)
+    def generate_target(self, prompt, seed=None):
+        if seed is not None:
+            torch.manual_seed(seed)
         with torch.no_grad():
-            target_imgs = self.sd_pipeline(
-                prompts,
-                guidance_scale=7.5,
-                num_inference_steps=50,
-                height=512,
-                width=512,
-            ).images
-            target_imgs[0].save("target_image.png")
-            return target_imgs[0]
+            target_imgs = self.sd_pipeline(prompt, guidance_scale=7.5, num_inference_steps=50,
+                                            height=512, width=512).images
+        return target_imgs[0]
