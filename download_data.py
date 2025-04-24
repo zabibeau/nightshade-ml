@@ -39,8 +39,8 @@ if __name__ == "__main__":
     # Unzip the downloaded files
     print("Unzipping files...")
     with zipfile.ZipFile(data_save_path, 'r') as zip_ref:
-        zip_ref.extractall('train2014')
+        zip_ref.extractall('.')
     print(f"Extracted {data_save_path} to 'train2014' directory.")
     with zipfile.ZipFile(annotation_save_path, 'r') as zip_ref:
-        zip_ref.extractall('annotations')
+        zip_ref.extractall('.')
     print(f"Extracted {annotation_save_path} to 'annotations' directory.")
