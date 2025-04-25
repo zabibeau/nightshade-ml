@@ -11,6 +11,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import random
 from tqdm.notebook import tqdm
+from collections import defaultdict
+
 
 # Note: this code is heavily based on the original nightshade implementation which can be found at:
 # https://github.com/Shawn-Shan/nightshade-release/tree/main
@@ -86,7 +88,6 @@ def get_dataset(annotation_file, data_dir, limit=None, unique_images=True):
     
     # Group by image_id if we want unique images
     if unique_images:
-        from collections import defaultdict
         image_dict = defaultdict(list)
         for ann in annotations['annotations']:
             image_dict[ann['image_id']].append(ann)
@@ -111,13 +112,13 @@ def get_dataset(annotation_file, data_dir, limit=None, unique_images=True):
     
     df = pd.DataFrame(data)
     if limit:
-        df = df.head(limit)
+        df = df.sample(n=limit, random_state=5806)
     
     print(f"Loaded {len(df)} {'unique image' if unique_images else 'caption'} entries")
     return df
 
 def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.25, output_dir='poisoning_candidates'):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     clip_model = ClipModel(device)
     os.makedirs(output_dir, exist_ok=True)
     candidates = []
