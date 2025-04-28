@@ -4,3 +4,5 @@ __pycache__/
 train2014/
 annotations/
 poisoning_candidates/
+poisoned_images/
+output_models/

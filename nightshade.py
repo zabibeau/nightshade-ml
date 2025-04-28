@@ -33,6 +33,7 @@ class Nightshade:
             torch_dtype=torch.float16,
         )
         pipe.to(self.device)
+        pipe._progress_bar_config = {"disable": True}
         return pipe
 
     def _create_transforms(self):

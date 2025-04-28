@@ -94,21 +94,26 @@ def get_dataset(annotation_file, data_dir, limit=None, unique_images=True):
         
         # Randomly select one caption per image
         data = []
-        for img_id, anns in image_dict.items():
+        for img_id, anns in tqdm(image_dict.items(), desc="Processing unique images", total=len(image_dict)):
             selected = random.choice(anns)
+            img_path= f"{data_dir}/COCO_train2014_{img_id:012d}.jpg"
             data.append({
                 'annotation_id': selected['id'],
                 'image_id': img_id,
                 'caption': selected['caption'],
-                'image_path': f"{data_dir}/COCO_train2014_{img_id:012d}.jpg"
+                'image_path': img_path
             })
+
     else:
-        data = [{
-            'annotation_id': ann['id'],
-            'image_id': ann['image_id'],
-            'caption': ann['caption'],
-            'image_path': f"{data_dir}/COCO_train2014_{ann['image_id']:012d}.jpg"
-        } for ann in annotations['annotations']]
+        data = []
+        for ann in tqdm(annotations['annotations'], desc="Processing all captions", total=len(annotations['annotations'])):
+            img_path = f"{data_dir}/COCO_train2014_{ann['image_id']:012d}.jpg"
+            data.append({
+                'annotation_id': ann['id'],
+                'image_id': ann['image_id'],
+                'caption': ann['caption'],
+                'image_path': img_path,
+            })
     
     df = pd.DataFrame(data)
     if limit:
@@ -136,7 +141,7 @@ def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.2
     if len(candidates) < num_candidates:
         raise Exception(f"Not enough candidates for {concept}, found {len(candidates)}, required {num_candidates}")
     
-    captions = [c[1] for c in candidates]
+    captions = [c['text'] for c in candidates]
     caption_embeddings = clip_model.get_text_embedding(captions).cpu().numpy()
     target_embedding = clip_model.get_text_embedding(f"a photo of a {concept}").cpu().numpy()
     sims = cosine_similarity(caption_embeddings, target_embedding).flatten()
@@ -152,3 +157,44 @@ def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.2
         pickle.dump(current_data, open(os.path.join(output_dir, f"{concept}_{i}.p"), 'wb'))
 
     print(f"Saved {len(top_candidates)} poisoning candidates for {concept} in {output_dir}")
+
+
+def create_mixed_dataset(clean_df, poisoned_df):
+
+    if len(poisoned_df) > len(clean_df):
+        raise ValueError("Poisoned dataset cannot be larger than clean dataset.")
+    if 'image_id' not in clean_df.columns or 'image_id' not in poisoned_df.columns:
+        raise ValueError("Both datasets must contain 'image_id' column.")
+    if len(clean_df) == 0 or len(poisoned_df) == 0:
+        raise ValueError("Both datasets must be non-empty.")
+    clean_df = clean_df.copy()
+    poisoned_df = poisoned_df.copy()
+
+    for i, row in tqdm(poisoned_df.iterrows(), desc="Mixing datasets", total=len(poisoned_df)):
+        # Get the index of the matching row in clean_df
+        matching_indices = clean_df.index[clean_df['image_id'] == row['image_id']]
+        
+        # If we found a match (should be exactly one if image_ids are unique)
+        if len(matching_indices) > 0:
+            # Update each column individually to avoid alignment issues
+            for col in ['caption', 'image_path', 'image_id']:
+                clean_df.loc[matching_indices, col] = row[col]
+
+    mixed_df = clean_df.sample(frac=1).reset_index(drop=True)  # Shuffle the mixed dataset
+    print(f"Created mixed dataset with {len(poisoned_df)}/{len(mixed_df)} poisoned entries.\t {len(poisoned_df) / len(mixed_df) * 100:.2f}% poisoned.")
+    return mixed_df
+
+def get_poisoned_dataset(poisoning_candidates_dir, limit=None):
+    poisoned_df = []
+    for file in glob.glob(os.path.join(poisoning_candidates_dir, "*.p")):
+        data = pickle.load(open(file, 'rb'))
+        poisoned_df.append({
+            'image_id': file.split('/')[-1].split('_')[1].split('.')[0],
+            'caption': data['text'],
+            'image_path': file,
+        })
+    poisoned_df = pd.DataFrame(poisoned_df)
+    if limit:
+        poisoned_df = poisoned_df.sample(n=limit, random_state=5806)
+    print(f"Loaded {len(poisoned_df)} poisoned entries from {poisoning_candidates_dir}")
+    return poisoned_df
