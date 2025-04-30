@@ -28,7 +28,7 @@ poisoned_prompts = [pickle.load(open(f, 'rb')) for f in candidate_files]
 
 # Paths
 lora_weights_path = f'./output_models/{method}_300/lora_adapter'
-poisoned_img_dir = "./poisoned_images/original/images"
+poisoned_img_dir = f"./poisoned_images/{method}/images"
 clean_img_dir = "./poisoning_candidates/images"
 baseline_model_path = "runwayml/stable-diffusion-v1-5"
 poisoned_model_path = "runwayml/stable-diffusion-v1-5"
