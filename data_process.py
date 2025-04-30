@@ -175,7 +175,8 @@ def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.2
             "text": caption,
             "image_id": image_id
         }
-        pickle.dump(current_data, open(os.path.join(output_dir, f"{concept}_{i}.p"), 'wb'))
+        pickle.dump(current_data, open(os.path.join(output_dir, f"pickle/{concept}_{i}.p"), 'wb'))
+        img.save(os.path.join(output_dir, f'images/{concept}_{image_id}.jpg'))
     
     print(f"Saved {len(top_indices)} poisoning candidates for {concept} in {output_dir}")
 

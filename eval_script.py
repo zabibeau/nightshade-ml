@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 # --- Load Models ---
 BASE_MODEL_PATH = "runwayml/stable-diffusion-v1-5"  # <-- your base model
-LORA_WEIGHTS_PATH = 'output_models/original_300/lora_adapter'
+LORA_WEIGHTS_PATH = 'output_models/fgsm_300/lora_adapter'
 
 # Load your fine-tuned pipeline
 pipe = StableDiffusionPipeline.from_pretrained(
