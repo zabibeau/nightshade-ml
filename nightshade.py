@@ -13,7 +13,7 @@ SD_MODEL = "runwayml/stable-diffusion-v1-5"
 
 class Nightshade:
     
-    def __init__(self, target_concept, device,  penalty_method=None, sd_pipeline=None, eps=0.1):
+    def __init__(self, target_concept, device,  penalty_method=None, sd_pipeline=None, eps=0.15):
         self.target_concept = target_concept
         self.device = device
         self.eps = eps
@@ -64,8 +64,7 @@ class Nightshade:
             source_tensor, 
             target_latent, 
             modifier, 
-            self.latent_function, 
-            eps=self.eps
+            self.latent_function
         )
         # Clamp the perturbation to ensure pixel values are within valid range
         return torch.clamp(perturbation + source_tensor, -1.0, 1.0)
