@@ -6,3 +6,4 @@ annotations/
 poisoning_candidates/
 poisoned_images/
 output_models/
+generated_samples/

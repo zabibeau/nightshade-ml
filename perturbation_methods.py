@@ -1,7 +1,9 @@
 import torch
+import lpips
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+lpips_loss = lpips.LPIPS(net='vgg').to(device)
 
-def fgsm_penalty(source_tensor, target_latent, modifier, latent_function, eps=0.25):
+def fgsm_penalty(source_tensor, target_latent, modifier, latent_function, eps=0.2):
     modifier = modifier.detach().requires_grad_(True)
     source_tensor = source_tensor.detach().requires_grad_(True)
     target_latent = target_latent.detach()
@@ -15,7 +17,7 @@ def fgsm_penalty(source_tensor, target_latent, modifier, latent_function, eps=0.
     adv_tensor = torch.clamp(source_tensor + perturbation, -1, 1)
     return (adv_tensor - source_tensor)
 
-def pgd_penalty(source_tensor, target_latent, modifier, latent_function, iterations=50, step_size=0.03, eps=0.2):
+def pgd_penalty(source_tensor, target_latent, modifier, latent_function, iterations=10, step_size=0.05, eps=0.1):
     modifier = modifier.detach().requires_grad_(True)
     source_tensor = source_tensor.detach().requires_grad_(True)
     target_latent = target_latent.detach()
@@ -38,8 +40,10 @@ def nightshade_penalty(
     target_latent,
     modifier,
     latent_function,
-    t_size=150,
-    eps=0.15,
+    t_size=20,
+    eps=0.1,
+    lpips_threshold=0.07,
+    verbose=True,
 ):
     # Constants
     max_change = eps / 0.5
@@ -51,32 +55,33 @@ def nightshade_penalty(
     modifier = modifier.detach()
 
     for i in range(t_size):
-        # Adjust step size (optional decay)
         actual_step_size = step_size - (step_size - step_size / 100) * (i / t_size)
-
-        # Reattach modifier with gradients enabled
         modifier.requires_grad_(True)
-
-        # Create adversarial input
         adv_tensor = torch.clamp(modifier + source_tensor, -1.0, 1.0)
 
         with torch.autocast(device_type="cuda", dtype=torch.float16):
             adv_latent = latent_function(adv_tensor)
 
         # Compute MSE loss in latent space
-        loss = torch.nn.functional.mse_loss(adv_latent, target_latent)
+        latent_loss = torch.nn.functional.mse_loss(adv_latent, target_latent)
 
         # Backpropagate
-        grad = torch.autograd.grad(loss, modifier, retain_graph=False, create_graph=False)[0]
+        s_img = (source_tensor + 1) / 2.0
+        t_img = (adv_tensor + 1) / 2.0
+        lpips_val = lpips_loss(s_img, t_img)
+
+        perceptual_penalty = torch.relu(lpips_val - lpips_threshold)
+        total_loss = latent_loss + perceptual_penalty
 
         # Gradient step: signed update
+        grad = torch.autograd.grad(total_loss, modifier, retain_graph=False)[0]
         modifier = modifier - actual_step_size * torch.sign(grad)
 
         # Clamp and detach modifier to prevent graph accumulation
         modifier = torch.clamp(modifier, -max_change, max_change).detach()
 
-        if i % 50 == 0 or i == t_size - 1:
-            print(f"[{i}/{t_size}] Loss: {loss.item():.4f}")
+        if (i % 50 == 0 or i == t_size - 1) and verbose:
+            print(f"[{i}/{t_size}]\tLatent Loss: {latent_loss.item():.4f}\tLPIPS: {lpips_val.item():.4f}")
 
     return modifier
 
