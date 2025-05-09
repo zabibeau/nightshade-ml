@@ -115,6 +115,9 @@ def get_dataset(annotation_file, data_dir, limit=None, unique_images=True):
 def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.25, output_dir='poisoning_candidates', batch_size=32):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     clip_model = ClipModel(device)
+    if os.path.exists(output_dir) and len(os.listdir(f'{output_dir}/pickle')) >= num_candidates:
+        print(f"Poisoning candidates already exist in {output_dir}, skipping generation.")
+        return
     os.makedirs(output_dir, exist_ok=True)
     
     candidates = []  # Will store (image, caption, image_id) tuples
@@ -233,3 +236,25 @@ def get_poisoned_dataset(poisoning_candidates_dir, limit=None):
         poisoned_df = poisoned_df.sample(n=limit, random_state=5806)
     print(f"Loaded {len(poisoned_df)} poisoned entries from {poisoning_candidates_dir}")
     return poisoned_df
+
+def get_anchor_images(pipeline, target_concept, num_images=10, output_dir='anchor_images', seed=None):
+    if os.path.exists(output_dir) and len(os.listdir(output_dir)) >= num_images:
+        print(f"Anchor images already exist in {output_dir}, skipping generation.")
+        return
+    os.makedirs(output_dir, exist_ok=True)
+    if seed is not None:
+        torch.manual_seed(seed)
+        num_images = 1
+    for i in tqdm(range(num_images), desc="Generating anchor images"):
+
+        
+        with torch.no_grad():
+            img = pipeline(
+                f"A photo of a {target_concept}",
+                guidance_scale=7.5,
+                num_inference_steps=25,
+            ).images[0]
+        
+        img.save(os.path.join(output_dir, f"anchor_{i:04d}.jpg"))
+        
+    print(f"Saved {num_images} anchor images for {target_concept} in {output_dir}")
