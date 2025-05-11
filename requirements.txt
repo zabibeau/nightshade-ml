@@ -1,4 +1,7 @@
 accelerate==1.6.0
+aiohappyeyeballs==2.6.1
+aiohttp==3.11.18
+aiosignal==1.3.2
 anyio==4.9.0
 argon2-cffi==23.1.0
 argon2-cffi-bindings==21.2.0
@@ -17,17 +20,22 @@ clip @ git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8
 comm==0.2.2
 contourpy==1.3.2
 cycler==0.12.1
+datasets==3.6.0
 debugpy==1.8.14
 decorator==5.2.1
 defusedxml==0.7.1
 diffusers==0.33.1
+dill==0.3.8
 einops==0.8.1
+evaluate==0.4.3
 exceptiongroup==1.2.2
 executing==2.2.0
+fairscale==0.4.13
 fastjsonschema==2.21.1
 filelock==3.13.1
 fonttools==4.57.0
 fqdn==1.5.1
+frozenlist==1.6.0
 fsspec==2024.6.1
 ftfy==6.3.1
 h11==0.14.0
@@ -35,6 +43,7 @@ httpcore==1.0.8
 httpx==0.28.1
 huggingface-hub==0.30.2
 idna==3.10
+image-reward==1.5
 imageio==2.37.0
 importlib_metadata==8.6.1
 ipykernel==6.29.5
@@ -69,6 +78,8 @@ matplotlib==3.10.1
 matplotlib-inline==0.1.7
 mistune==3.1.3
 mpmath==1.3.0
+multidict==6.4.3
+multiprocess==0.70.16
 nbclient==0.10.2
 nbconvert==7.16.6
 nbformat==5.10.4
@@ -113,9 +124,11 @@ pillow==11.0.0
 platformdirs==4.3.7
 prometheus_client==0.21.1
 prompt_toolkit==3.0.51
+propcache==0.3.1
 psutil==7.0.0
 ptyprocess==0.7.0
 pure_eval==0.2.3
+pyarrow==20.0.0
 pycparser==2.22
 Pygments==2.19.1
 pyparsing==3.2.3
@@ -143,6 +156,7 @@ sympy==1.13.1
 terminado==0.18.1
 threadpoolctl==3.6.0
 tifffile==2025.3.30
+timm==0.6.13
 tinycss2==1.4.0
 tokenizers==0.21.1
 tomli==2.2.1
@@ -166,4 +180,6 @@ webencodings==0.5.1
 websocket-client==1.8.0
 widgetsnbextension==4.0.14
 xformers==0.0.29.post3
+xxhash==3.5.0
+yarl==1.20.0
 zipp==3.21.0
