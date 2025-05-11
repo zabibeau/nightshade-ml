@@ -32,7 +32,7 @@ class ClipModel(object):
     def __init__(self, device):
         self.device = device
         self.model, self.preprocess = clip.load("ViT-B/32", device=device)
-        self.model.cuda()
+        self.model.to(self.device)
         self.tokenizer = clip.tokenize
 
     def get_text_embedding(self, text):
@@ -43,10 +43,12 @@ class ClipModel(object):
             text_features = self.model.encode_text(tokenized_text)
         return text_features
     
-    def get_image_embedding(self, img):
-        image = self.preprocess(img).unsqueeze(0).to(self.device)
+    def get_image_embedding(self, img_list):
+        images = [self.preprocess(img).unsqueeze(0).to(self.device) for img in img_list]
+        images = torch.cat(images, dim=0)
         with torch.no_grad():
-            image_features = self.model.encode_image(image)
+            image_features = self.model.encode_image(images)
+            image_features /= image_features.norm(dim=-1, keepdim=True)
         return image_features
     
     def get_score(self, images, texts, softmax=False):
@@ -113,12 +115,25 @@ def get_dataset(annotation_file, data_dir, limit=None, unique_images=True):
     return df
 
 def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.25, output_dir='poisoning_candidates', batch_size=32):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    os.makedirs(os.path.join(output_dir, 'pickle'), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     clip_model = ClipModel(device)
+    if os.path.exists(output_dir) and len(os.listdir(f'{output_dir}/pickle')) >= num_candidates:
+        print(f"Poisoning candidates already exist in {output_dir}, skipping generation.")
+        return
+    elif os.path.exists(output_dir) and 0 <= len(os.listdir(f'{output_dir}/pickle')) < num_candidates:
+        print(f"Poisoning candidates already exist in {output_dir}, but not enough. Regenerating.")
+        for file in glob.glob(os.path.join(output_dir, "pickle", "*.p")):
+            os.remove(file)
+        for file in glob.glob(os.path.join(output_dir, "images", "*.jpg")):
+            os.remove(file)
     os.makedirs(output_dir, exist_ok=True)
     
     candidates = []  # Will store (image, caption, image_id) tuples
-    text_prompt = f"a photo of a {concept}"
+    text_prompt = f"{concept}"
 
     # Process images in batches
     for batch_start in tqdm(range(0, len(df), batch_size), desc="Processing batches"):
@@ -147,7 +162,7 @@ def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.2
         
         # Filter candidates
         for score, row, img in zip(scores, batch_entries, batch_images):
-            if score > clip_threshold:
+            if score > clip_threshold and concept in row['caption']:
                 candidates.append((img, row['caption'], row['image_id']))
     
     # Check if we have enough candidates
@@ -160,11 +175,11 @@ def get_poisoning_candidates(df, concept, num_candidates=300, clip_threshold=0.2
     # Batch compute text embeddings
     with torch.no_grad():
         # Process all captions at once
-        caption_embeddings = clip_model.get_text_embedding(candidate_captions).cpu().numpy()
+        image_embeddings = clip_model.get_image_embedding(list(candidate_images)).cpu().numpy()
         target_embedding = clip_model.get_text_embedding([text_prompt]).cpu().numpy()
     
     # Calculate similarities in bulk
-    sims = cosine_similarity(caption_embeddings, target_embedding).flatten()
+    sims = cosine_similarity(image_embeddings, target_embedding).flatten()
     top_indices = np.argsort(sims)[::-1][:num_candidates]
     
     # Save top candidates
@@ -233,3 +248,25 @@ def get_poisoned_dataset(poisoning_candidates_dir, limit=None):
         poisoned_df = poisoned_df.sample(n=limit, random_state=5806)
     print(f"Loaded {len(poisoned_df)} poisoned entries from {poisoning_candidates_dir}")
     return poisoned_df
+
+def get_anchor_images(pipeline, target_concept, num_images=10, output_dir='anchor_images', seed=None):
+    if os.path.exists(output_dir) and len(os.listdir(output_dir)) >= num_images:
+        print(f"Anchor images already exist in {output_dir}, skipping generation.")
+        return
+    os.makedirs(output_dir, exist_ok=True)
+    if seed is not None:
+        torch.manual_seed(seed)
+        num_images = 1
+    for i in tqdm(range(num_images), desc="Generating anchor images"):
+
+        
+        with torch.no_grad():
+            img = pipeline(
+                f"A photo of a {target_concept}",
+                guidance_scale=7.5,
+                num_inference_steps=25,
+            ).images[0]
+        
+        img.save(os.path.join(output_dir, f"anchor_{i:04d}.jpg"))
+        
+    print(f"Saved {num_images} anchor images for {target_concept} in {output_dir}")

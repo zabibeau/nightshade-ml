@@ -11,7 +11,7 @@ import os
 import pickle
 from PIL import Image
 from torchvision import transforms
-from peft import LoraConfig, get_peft_model, get_peft_model_state_dict
+from peft import LoraConfig, get_peft_model, get_peft_model_state_dict, set_peft_model_state_dict
 from typing import Dict
 torch.backends.cudnn.benchmark = True
 
@@ -99,7 +99,9 @@ def save_lora_model(unet, output_dir: str) -> None:
 
 # --- Main Training ---
 
-def train_model(df, output_dir: str = "lora_model", epochs: int = 10, batch_size: int = 4) -> None:
+def train_model(df, output_dir: str = "lora_model", epochs: int = 10, batch_size: int = 4, checkpoint_dir=None) -> None:
+
+    starting_epoch = 0
     # Set up accelerator with proper mixed precision
     accelerator = Accelerator(
         gradient_accumulation_steps=TrainingConfig.gradient_accumulation,
@@ -154,15 +156,14 @@ def train_model(df, output_dir: str = "lora_model", epochs: int = 10, batch_size
         
     # Apply LoRA to the model in float32
     unet = setup_lora(unet)
-
-    ##3checkpoint_dir = "output_models/original_300/epoch_4"  # <- point to your last checkpoint
-    # if os.path.exists(os.path.join(checkpoint_dir, "pytorch_lora_weights.bin")):
-    #     print(f"Loading previous LoRA weights from {checkpoint_dir}...")
-    #     lora_state_dict = torch.load(os.path.join(checkpoint_dir, "pytorch_lora_weights.bin"), map_location="cpu")
-    #     set_peft_model_state_dict(unet, lora_state_dict)
-    #     print("Loaded previous LoRA weights!")
-    # else:
-    #     print("No previous LoRA checkpoint found, starting fresh.")
+    if checkpoint_dir is not None:
+        if os.path.exists(os.path.join(checkpoint_dir, "pytorch_lora_weights.bin")):
+            print(f"Loading previous LoRA weights from {checkpoint_dir}...")
+            lora_state_dict = torch.load(os.path.join(checkpoint_dir, "pytorch_lora_weights.bin"), map_location="cpu")
+            set_peft_model_state_dict(unet, lora_state_dict)
+            print("Loaded previous LoRA weights!")
+        else:
+            print("No previous LoRA checkpoint found, starting fresh.")
     
     # Keep UNet in float32 for training with accelerator handling mixed precision
     # Don't convert UNet to half precision here
@@ -222,6 +223,7 @@ def train_model(df, output_dir: str = "lora_model", epochs: int = 10, batch_size
 
     # --- Training loop ---
     for epoch in range(epochs):
+        running_loss = 0.0
         unet.train()
         progress_bar = tqdm(total=len(dataloader), desc=f"Epoch {epoch+1}/{epochs}", mininterval=5)
 
@@ -279,19 +281,20 @@ def train_model(df, output_dir: str = "lora_model", epochs: int = 10, batch_size
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
+                running_loss += loss.detach().item()
 
                 progress_bar.update(1)
-                progress_bar.set_postfix(loss=loss.detach().item())
+                progress_bar.set_postfix(loss=running_loss / (step + 1))
 
         # Save checkpoint
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             unwrapped_unet = accelerator.unwrap_model(unet)
-            save_lora_model(unwrapped_unet, os.path.join(output_dir, f"epoch_{epoch+1}"))
+            save_lora_model(unwrapped_unet, os.path.join(output_dir, f"epoch_{starting_epoch+epoch+1}"))
 
     # Final save
     if accelerator.is_main_process:
         unwrapped_unet = accelerator.unwrap_model(unet)
         save_lora_model(unwrapped_unet, os.path.join(output_dir, 'lora_adapter'))
 
-    print(f"✅ Training complete. Model saved to {output_dir}")
+    print(f"Training complete. Model saved to {output_dir}")

@@ -13,10 +13,9 @@ SD_MODEL = "runwayml/stable-diffusion-v1-5"
 
 class Nightshade:
     
-    def __init__(self, target_concept, device,  penalty_method=None, sd_pipeline=None, eps=0.15):
+    def __init__(self, target_concept, device,  penalty_method=None, sd_pipeline=None):
         self.target_concept = target_concept
         self.device = device
-        self.eps = eps
 
         if sd_pipeline is None:
             self.sd_pipeline = self.get_model()
@@ -55,15 +54,27 @@ class Nightshade:
         return latent
     
     def get_penalty(self, source_tensor, target_latent, modifier):
-        
+        # Collect hyperparameters dynamically
+        penalty_kwargs = {}
+        if hasattr(self, "eps"):
+            penalty_kwargs["eps"] = self.eps
+        if hasattr(self, "step_size"):
+            penalty_kwargs["step_size"] = self.step_size
+        if hasattr(self, "iterations"):
+            penalty_kwargs["iterations"] = self.iterations
+        if hasattr(self, "t_size"):
+            penalty_kwargs["t_size"] = self.t_size
+        if hasattr(self, "verbose"):
+            penalty_kwargs["verbose"] = self.verbose
+
         # Generate the perturbation using the penalty method
         perturbation = self.penalty_method(
             source_tensor, 
             target_latent, 
             modifier, 
-            self.latent_function
+            self.latent_function,
+            **penalty_kwargs
         )
-        # Clamp the perturbation to ensure pixel values are within valid range
         return torch.clamp(perturbation + source_tensor, -1.0, 1.0)
 
     def convert_to_tensor(self, cur_img):
@@ -83,16 +94,14 @@ class Nightshade:
         np_img = rearrange(np_img, 'c h w -> h w c')
         return Image.fromarray(np_img)
     
-    def generate(self, img, target_concept):
-        # Generate target image
-        with torch.no_grad():
-            target_image = self.generate_target(f"A photo of a {target_concept}")
-
+    def generate(self, img, target_concept, target_anchor_path=None):
         resized_img = self.transform(img)
-
-        # Source and target tensor
         source_tensor = self.convert_to_tensor(resized_img).to(self.device, non_blocking=True).half()
-        target_tensor = self.convert_to_tensor(target_image).to(self.device, non_blocking=True).half()
+
+        assert target_concept is not None, "Target concept must be provided"
+        anchor_img = Image.open(target_anchor_path).convert("RGB")
+        anchor_img = self.transform(anchor_img)
+        target_tensor = self.convert_to_tensor(anchor_img).to(self.device, non_blocking=True).half()
 
         # Encode target latent
         with torch.no_grad():
@@ -103,16 +112,3 @@ class Nightshade:
         final_adv = self.get_penalty(source_tensor, target_latent, modifier)
 
         return self.convert_to_image(final_adv)
-
-    def generate_target(self, prompt, seed=None):
-        if seed is not None:
-            torch.manual_seed(seed)
-        with torch.no_grad():
-            target_imgs = self.sd_pipeline(
-                prompt,
-                guidance_scale=7.5,
-                num_inference_steps=25,
-                height=512,
-                width=512
-            ).images
-        return target_imgs[0]
