@@ -1,6 +1,6 @@
 # Nightshade
 
-This repo contains code and information for a project for CS 5806
+This repo contains code and information for a project for CS 5806 Group 5: Zachary Bibeau, Munnawn Gill, Anandhan Manoharan, Yat Fei Cheung
 
 ## Project Details
 In 2023 Shan et al. created Nightshade, which is an adversarial poisoning framework that takes an artist's image and adds imperceptible perturbations. The aim is to hinder an image generative model's ability to learn from artist's work or to reproduce them through these perturbations. Nightshade is a strong step towards protecting artists' work, but their implementation relies on a single iterative penalty method, which may be a limitation. In order to strongly poison an image, it often may require large perturbations which risks causing visible artifacts to appear on the image.
