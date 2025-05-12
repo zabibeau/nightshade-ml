@@ -8,7 +8,10 @@ This repo contains code and information for a project for CS 5806
 
 ## Training Notebook
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zabibeau/nightshade-ml/blob/main/train_sd.ipynb)
 ## Evaluation Notebook
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/zabibeau/nightshade-ml/blob/main/evaluate_nightshade.ipynb)
 
 ## Setup Instructions
 1. Install python if you haven't (use any version except for 3.13)
